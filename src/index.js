@@ -94,7 +94,7 @@ export default {
 		} else if (url.pathname === '/ndjson-to-json') {
 			response = await handleNdjsonRequest(request, env);
 		} else {
-			response = new Response('Not Found', { status: 404 });
+			response = new Response('Not Found ' + url.pathname, { status: 404 });
 		}
 		
 		// GLOBAL: Clone the response and set the X-Robots-Tag header for all pages
@@ -170,7 +170,7 @@ async function handleFractalRequest(request) {
 
 // handle the ndjson-to-json request
 // example: /ndjson-to-json?url=https://ntfy.sh/FdKwILjQxxHWZ26u/json?poll=1&since=1h
-async function handleNdjsonRequest(request) {
+async function handleNdjsonRequest(request, env) {
 
 	const VALID_HOSTS_FOR_NDJSON_TO_JSON = env.ENABLE_IMAGE_GENERATION || "ntfy.sh,stuarteggerton.com";
 
