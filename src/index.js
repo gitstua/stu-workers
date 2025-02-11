@@ -25,6 +25,7 @@
  * - fractal.js: Core fractal generation algorithms
  */
 
+import { XMLParser } from 'fast-xml-parser';
 import { checkRateLimit } from './rateLimit';
 import { createMinimalBMP } from './imageGenerators/bmp';
 import { createMinimalPNG } from './imageGenerators/png';
@@ -73,6 +74,7 @@ async function handleRequest(request) {
 	return new Response(html, { headers })
 }
 
+// Add the new endpoint to the router
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
@@ -93,6 +95,8 @@ export default {
 			response = new Response('Worker is running', { status: 200 });
 		} else if (url.pathname === '/ndjson-to-json') {
 			response = await handleNdjsonRequest(request, env);
+		} else if (url.pathname === '/xml-to-json') {
+			response = await handleXmlRequest(request, env);
 		} else {
 			response = new Response('Not Found ' + url.pathname, { status: 404 });
 		}
@@ -171,7 +175,6 @@ async function handleFractalRequest(request) {
 // handle the ndjson-to-json request
 // example: /ndjson-to-json?url=https://ntfy.sh/FdKwILjQxxHWZ26u/json?poll=1&since=1h
 async function handleNdjsonRequest(request, env) {
-
 	const VALID_HOSTS_FOR_NDJSON_TO_JSON = env.ENABLE_IMAGE_GENERATION || "ntfy.sh,stuarteggerton.com";
 
 	// Create a URL object to access the query parameters
@@ -190,7 +193,7 @@ async function handleNdjsonRequest(request, env) {
 	const hostname = urlObj.hostname;
 	if (!VALID_HOSTS_FOR_NDJSON_TO_JSON.includes(hostname)) {
 		// Use 403 Forbidden since this is a policy restriction rather than invalid input
-		return new Response('Invalid hostname - limited hostnames allowed', { status: 403 });
+		return new Response('Invalid hostname - limited hostnames allowed in url parameter', { status: 403 });
 	}
 
 	// Fetch the remote NDJSON content from the given URL
@@ -222,4 +225,58 @@ async function handleNdjsonRequest(request, env) {
 	return new Response(JSON.stringify(jsonArray), {
 		headers: { 'Content-Type': 'application/json' }
 	});
+}
+
+async function handleXmlRequest(request, env) {
+	const VALID_HOSTS_FOR_XML_TO_JSON = "api.irishrail.ie,stuarteggerton.com";
+	const url = new URL(request.url);
+	// Get full URL from url parameter and extract everything after url=
+	const urlParam = decodeURIComponent(url.searchParams.toString().split('url=')[1]);
+
+	if (!urlParam) {
+		return new Response('URL parameter is required', { status: 400 });
+	}
+
+	const urlObjXML = new URL(urlParam);
+	const hostnameXML = urlObjXML.hostname;
+	if (!VALID_HOSTS_FOR_XML_TO_JSON.split(',').includes(hostnameXML)) {
+		return new Response('Invalid hostname - limited hostnames allowed in url parameter', { status: 403 });
+	}
+
+	try {
+		const remoteResponse = await fetch(urlParam);
+
+		//check the remoteresponse
+		if (!remoteResponse.ok) {
+			//log the error
+			console.error('Error fetching URL', remoteResponse.statusText);
+			console.error('Error fetching URL', remoteResponse.message);
+
+
+			return new Response('Error fetching URL ' + urlParam, { status: 400 });
+		}
+
+
+		const xmlText = await remoteResponse.text();
+
+		const parser = new XMLParser({
+			ignoreAttributes: false,
+			attributeNamePrefix: "@_",
+			textNodeName: "#text",
+			parseTagValue: true,
+			isArray: (name, jpath, isLeafNode, isAttribute) => {
+				// Return true if element has child nodes
+				// This ensures nested elements are properly handled as arrays
+				return !isLeafNode;
+			}
+		});
+
+		const jsonResult = parser.parse(xmlText);
+		return new Response(JSON.stringify(jsonResult), {
+			headers: { 'Content-Type': 'application/json' }
+		});
+
+	} catch (error) {
+		return new Response('Invalid XML format: ' + error.message, { status: 400 });
+	}
 }

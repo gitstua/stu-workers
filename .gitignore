@@ -189,3 +189,4 @@ dist
 .copilot-*
 github-copilot/
 
+tmp/
