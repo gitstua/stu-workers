@@ -6,7 +6,8 @@ A Cloudflare Worker that demonstrates a variety of features.
 ## Features
 
 - `/fractal` Generates Mandelbrot and Julia set fractals
-- `/ndjson-to-json` NDJSON to JSON conversion endpoint
+- `/ndjson-to-json` NDJSON to JSON conversion endpoint (limited to certain hostnames)
+- `/xml-to-json` XML to JSON conversion endpoint (limited to certain hostnames)
 
 ## Endpoints
 
