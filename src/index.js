@@ -125,6 +125,11 @@ export default {
 				return await handleCreatePollRequest(request, env);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
+		} else if (url.pathname === '/poll/all') {
+			const handler = async (request, env, ctx) => {
+				return await handleGetAllPolls(request, env);
+			};
+			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/protected') {
 			const handler = async (request, env, ctx) => {
 				return new Response('This is a protected route but you are now allowed to access it');
@@ -335,6 +340,51 @@ async function handleCreatePollRequest(request, env) {
 	} catch (error) {
 		return new Response(JSON.stringify({ error: error.message }), {
 			status: 400,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+}
+
+async function handleGetAllPolls(request, env) {
+	try {
+		const polls = await env.POLLS.list();
+		const allPolls = [];  // Changed variable name to avoid conflict
+		
+		for (const poll of polls.keys) {
+			console.log(`about to get poll ${poll.name}`);
+			const pollData = await env.POLLS.get(poll.name);
+
+			//if the pollData is null or not valid json, skip it
+			if (pollData === null || pollData === undefined || pollData === '') {
+				continue;
+			}
+
+			//check if the pollData is valid json
+			try {
+				const pollDataParsed = JSON.parse(pollData);
+				allPolls.push(pollDataParsed);
+			} catch (error) {
+				console.error('Error parsing poll data:', error);
+				continue;
+			}
+
+			//sort the pollData by closedAt date so the latest poll is first
+			allPolls.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+
+			//parse the pollData
+			const pollDataParsed = JSON.parse(pollData);
+			allPolls.push(JSON.parse(pollData));
+		}
+
+		return new Response(JSON.stringify(allPolls), {
+			headers: { 'Content-Type': 'application/json' }
+		});
+	} catch (error) {
+		return new Response(JSON.stringify({ 
+			error: error.message,
+			stack: error.stack 
+		}), {
+			status: 500,
 			headers: { 'Content-Type': 'application/json' }
 		});
 	}
