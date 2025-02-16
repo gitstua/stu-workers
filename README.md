@@ -48,6 +48,66 @@ Compare to JSON:
 
 This endpoint expects a URL which returns JSON returns this as JSON.
 
+### /poll
+
+Endpoints for creating and voting in polls (e.g. for deciding what's for dinner).
+
+#### /poll/new
+Creates a new poll with options and voting timeframe.
+
+Example request:
+```json
+POST /poll/new
+{
+    "options": [
+        {"name": "Pizza", "url": "https://example.com/pizza"},
+        {"name": "Sushi", "url": "https://example.com/sushi"},
+        {"name": "Tacos", "url": "https://example.com/tacos"}
+    ],
+    "open": "2024-03-20T18:00:00Z",  // Optional, defaults to now
+    "close": "2024-03-20T20:00:00Z"  // Optional, defaults to 24h from creation
+}
+```
+
+Response:
+```json
+{
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "open": "2024-03-20T18:00:00Z",
+    "close": "2024-03-20T20:00:00Z",
+    "options": [
+        {"name": "Pizza", "url": "https://example.com/pizza", "votes": 0},
+        {"name": "Sushi", "url": "https://example.com/sushi", "votes": 0},
+        {"name": "Tacos", "url": "https://example.com/tacos", "votes": 0}
+    ]
+}
+```
+
+#### /poll/vote
+Vote for an option in an existing poll.
+
+Example request:
+```json
+POST /poll/vote
+{
+    "pollId": "123e4567-e89b-12d3-a456-426614174000",
+    "optionIndex": 0  // Vote for the first option (Pizza)
+}
+```
+
+Response:
+```json
+{
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "open": "2024-03-20T18:00:00Z",
+    "close": "2024-03-20T20:00:00Z",
+    "options": [
+        {"name": "Pizza", "url": "https://example.com/pizza", "votes": 1},
+        {"name": "Sushi", "url": "https://example.com/sushi", "votes": 0},
+        {"name": "Tacos", "url": "https://example.com/tacos", "votes": 0}
+    ]
+}
+```
 
 ## Examples 
 

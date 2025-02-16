@@ -30,6 +30,8 @@ import { checkRateLimit } from './rateLimit';
 import { createMinimalBMP } from './imageGenerators/bmp';
 import { createMinimalPNG } from './imageGenerators/png';
 import { generateFractal } from './fractal';
+import { createPoll, vote } from './poll';
+import { withApiKeyValidation } from './middleware/validateApiKey';
 
 addEventListener('fetch', event => {
 	event.respondWith(handleRequest(event.request))
@@ -79,6 +81,19 @@ export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 		let response;
+
+		//chec the binding of KV
+		console.log(env.POLLS);
+		console.log(env.RATE_LIMIT);
+
+		try {
+			await env.POLLS.put('test-key', 'test-value');
+			const value = await env.POLLS.get('test-key');
+			console.log('KV test successful:', value);
+			console.log('env.POLLS binding:', env.POLLS);
+		} catch (error) {
+			console.error('KV test failed:', error);
+		}
 		
 		if (url.pathname === '/') {
 			response = await handleRequest(request);
@@ -97,6 +112,24 @@ export default {
 			response = await handleNdjsonRequest(request, env);
 		} else if (url.pathname === '/xml-to-json') {
 			response = await handleXmlRequest(request, env);
+		} else if (url.pathname === '/poll/vote') {
+			response = await handleVoteRequest(request, env);
+		} else if (url.pathname === '/poll/results/json') {
+			response = await handlePollResultsJson(request, env);
+		} else if (url.pathname === '/poll/results/html') {
+			response = await handlePollResultsHtml(request, env);
+
+			// BELOW ARE PROTECTED ROUTES THAT REQUIRE AN API KEY
+		} else if (url.pathname === '/poll/new') {
+			const handler = async (request, env, ctx) => {
+				return await handleCreatePollRequest(request, env);
+			};
+			response = await withApiKeyValidation(handler)(request, env, ctx);
+		} else if (url.pathname === '/protected') {
+			const handler = async (request, env, ctx) => {
+				return new Response('This is a protected route but you are now allowed to access it');
+			};
+			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else {
 			response = new Response('Not Found ' + url.pathname, { status: 404 });
 		}
@@ -104,6 +137,16 @@ export default {
 		// GLOBAL: Clone the response and set the X-Robots-Tag header for all pages
 		const newResponse = new Response(response.body, response);
 		newResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
+
+		// Add this after the console.log statements
+		try {
+			await env.POLLS.put('test-key', 'test-value');
+			const value = await env.POLLS.get('test-key');
+			console.log('KV test successful:', value);
+		} catch (error) {
+			console.error('KV test failed:', error);
+		}
+
 		return newResponse;
 	}
 };
@@ -278,5 +321,117 @@ async function handleXmlRequest(request, env) {
 
 	} catch (error) {
 		return new Response('Invalid XML format: ' + error.message, { status: 400 });
+	}
+}
+
+async function handleCreatePollRequest(request, env) {
+	try {
+		const params = await request.json();
+		const poll = await createPoll(params, env.POLLS);
+		
+		return new Response(JSON.stringify(poll), {
+			headers: { 'Content-Type': 'application/json' }
+		});
+	} catch (error) {
+		return new Response(JSON.stringify({ error: error.message }), {
+			status: 400,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+}
+
+async function handleVoteRequest(request, env) {
+	try {
+		const { pollId, optionIndex } = await request.json();
+		const updatedPoll = await vote(pollId, optionIndex, env.POLLS);
+		
+		return new Response(JSON.stringify(updatedPoll), {
+			headers: { 'Content-Type': 'application/json' }
+		});
+	} catch (error) {
+		return new Response(JSON.stringify({ error: error.message }), {
+			status: 400,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+}
+
+async function handlePollResultsJson(request, env) {
+	try {
+		const url = new URL(request.url);
+		const pollId = url.searchParams.get('id');
+		if (!pollId) {
+			return new Response('Poll ID is required', { status: 400 });
+		}
+
+		const pollData = await env.POLLS.get(pollId);
+		if (!pollData) {
+			return new Response('Poll not found', { status: 404 });
+		}
+
+		return new Response(pollData, {
+			headers: { 'Content-Type': 'application/json' }
+		});
+	} catch (error) {
+		return new Response(JSON.stringify({ error: error.message }), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+}
+
+async function handlePollResultsHtml(request, env) {
+	try {
+		const url = new URL(request.url);
+		const pollId = url.searchParams.get('id');
+		if (!pollId) {
+			return new Response('Poll ID is required', { status: 400 });
+		}
+
+		const pollData = await env.POLLS.get(pollId);
+		if (!pollData) {
+			return new Response('Poll not found', { status: 404 });
+		}
+
+		const poll = JSON.parse(pollData);
+		const totalVotes = poll.options.reduce((sum, opt) => sum + opt.votes, 0);
+
+		const html = `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<title>Poll Results</title>
+				<style>
+					.poll-results { max-width: 600px; margin: 20px auto; }
+					.option { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+					.bar { height: 20px; background: #4CAF50; margin-top: 5px; }
+				</style>
+			</head>
+			<body>
+				<div class="poll-results">
+					<h1>Poll Results</h1>
+					${poll.options.map(opt => `
+						<div class="option">
+							<strong>${opt.name}</strong>
+							<div>Votes: ${opt.votes}</div>
+							${totalVotes > 0 ? `
+								<div class="bar" style="width: ${(opt.votes / totalVotes) * 100}%"></div>
+							` : ''}
+						</div>
+					`).join('')}
+					<div class="total">Total Votes: ${totalVotes}</div>
+				</div>
+			</body>
+			</html>
+		`;
+
+		return new Response(html, {
+			headers: { 'Content-Type': 'text/html' }
+		});
+	} catch (error) {
+		return new Response(`<h1>Error</h1><p>${error.message}</p>`, {
+			status: 500,
+			headers: { 'Content-Type': 'text/html' }
+		});
 	}
 }
