@@ -678,6 +678,8 @@ function renderPollSpa(url) {
       gap: 12px;
       align-items: center;
     }
+    .option.disabled { opacity: 0.6; }
+    .option.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(123,224,173,0.3); }
     .option .meta { display: grid; gap: 4px; }
     .option .name { font-weight: 700; font-size: 16px; }
     .votes { color: var(--muted); font-size: 13px; }
@@ -719,7 +721,8 @@ function renderPollSpa(url) {
         phase: 'idle', // idle | countdown | drumroll | reveal
         endsAt: null,
         timers: { refresh: null, countdown: null, drumroll: null },
-        confettiShown: false
+        confettiShown: false,
+        votedOption: null
       };
 
       const els = {
@@ -792,14 +795,16 @@ function renderPollSpa(url) {
 
         const opts = viewOptions();
         els.options.innerHTML = opts.map((opt, idx) => {
-          const checked = state.selected === idx ? 'checked' : '';
+          const isChosen = state.votedOption === idx;
           const pct = total > 0 ? Math.round(((opt.votes || 0) / total) * 100) : 0;
           const votesLabel = showNumbers ? (opt.votes || 0) + ' vote(s) · ' + pct + '%' : 'Votes hidden until reveal';
-          const disabled = state.phase !== 'countdown' ? 'disabled' : '';
+          const disableAll = state.votedOption !== null || state.phase !== 'countdown';
+          const disabled = disableAll ? 'disabled' : '';
           const orderBadge = state.phase === 'reveal' ? '<span class="badge">#' + (idx + 1) + '</span>' : '';
+          const optionClass = (state.votedOption !== null && state.votedOption !== idx ? 'disabled ' : '') + (isChosen ? 'selected' : '');
           return [
-            '<label class="option">',
-              '<input type="radio" name="option" value="', idx, '" ', checked, ' ', disabled, ' style="margin-right:10px;">',
+            '<label class="option ', optionClass, '">',
+              '<input type="radio" name="option" value="', idx, '" ', state.selected === idx ? 'checked' : '', ' ', disabled, ' style="margin-right:10px;">',
               '<div class="meta">',
                 '<div class="name">', opt.name, '</div>',
                 '<div class="bar"><span style="width:', showNumbers ? pct : 0, '%;"></span></div>',
@@ -864,6 +869,7 @@ function renderPollSpa(url) {
             throw new Error(data.error || 'Vote failed');
           }
           state.poll = data;
+          state.votedOption = state.selected;
           setStatus('Vote recorded. Results updating live.');
           renderPoll();
         } catch (err) {
@@ -1044,6 +1050,29 @@ function renderAdminPollSpa(url) {
         els.options.value = (poll.options || []).map(opt => opt.url ? (opt.name + '|' + opt.url) : opt.name).join('\\n');
       }
 
+      async function copyToClipboard(text) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+        } catch (err) {}
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          return true;
+        } catch (err) {
+          return false;
+        }
+      }
+
       async function savePoll() {
         const apiKey = els.key.value.trim();
         if (!apiKey) {
@@ -1119,6 +1148,12 @@ function renderAdminPollSpa(url) {
                   headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
                   body: JSON.stringify({ pollId })
                 });
+                const poll = polls.find(p => p.id === pollId);
+                if (poll) {
+                  const share = '❓ ' + (poll.question || 'Poll') + '\\n' + window.location.origin + '/poll/app?id=' + pollId;
+                  await copyToClipboard(share);
+                  setStatus('Reset and copied link to clipboard.');
+                }
               } else if (action === 'delete') {
                 await fetch('/poll/admin/delete', {
                   method: 'POST',

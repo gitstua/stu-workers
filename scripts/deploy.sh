@@ -126,4 +126,10 @@ done
 echo "Deploying worker..."
 npx wrangler deploy
 
+# update MASTER_KEY secret if set in env
+if [ -n "${MASTER_KEY-}" ]; then
+  echo "Updating MASTER_KEY secret from environment or .env file..."
+  printf "%s" "${MASTER_KEY}" | npx wrangler secret put "MASTER_KEY"
+fi
+
 echo "Deploy complete."

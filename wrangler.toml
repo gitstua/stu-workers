@@ -9,7 +9,6 @@ database_id = "b44ec761-32e0-48ac-88df-54e585d42dd1"
 
 
 [vars]
-MASTER_KEY = "your-secret-key-here"  # Set this in your environment
 RATE_LIMIT_PER_IP = "200"  # Can be overridden in the Cloudflare dashboard
 
 [[kv_namespaces]]
