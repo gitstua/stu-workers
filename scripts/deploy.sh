@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Deploy script for stu-workers (wrangler v4).
-# - Resolves/creates KV namespaces RATE_LIMIT and POLLS.
+# - Resolves/creates KV namespace RATE_LIMIT.
 # - Updates wrangler.toml with the resolved IDs (preview_id defaults to preview match or prod).
 # - Sets required secrets from env if provided (e.g., MASTER_KEY).
 # - Publishes the worker.
@@ -11,7 +11,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-REQUIRED_KVS=("RATE_LIMIT" "POLLS")
+REQUIRED_KVS=("RATE_LIMIT")
 REQUIRED_SECRETS=("MASTER_KEY")
 
 require_cmd() {
@@ -26,7 +26,7 @@ require_cmd python3
 require_cmd node
 
 fetch_kv_list() {
-  npx wrangler kv namespace list 2>/dev/null || echo "[]"
+  npx wrangler kv namespace list --json 2>/dev/null || echo "[]"
 }
 
 parse_id() {
@@ -59,22 +59,14 @@ KV_LINES=""
 for kv in "${REQUIRED_KVS[@]}"; do
   echo "Ensuring KV namespace: ${kv}"
   kv_list=$(fetch_kv_list)
+  echo "KV list raw:"
+  echo "${kv_list}"
   prod_id=$(parse_id "${kv_list}" "${kv}" 0)
   preview_id=$(parse_id "${kv_list}" "${kv}" 1)
 
   if [ -z "${prod_id}" ]; then
-    echo "KV ${kv} not found. Attempting to create..."
-    create_out=$(create_namespace "${kv}" "--binding=${kv}")
-    echo "Create output (truncated):"
-    echo "${create_out}" | head -n 10
-    kv_list=$(fetch_kv_list)
-    prod_id=$(parse_id "${kv_list}" "${kv}" 0)
-  fi
-
-  if [ -z "${prod_id}" ]; then
-    echo "Failed to resolve id for ${kv}. Current list:"
-    echo "${kv_list}" | head -n 50
-    exit 1
+    echo "KV ${kv} not found in list. Skipping creation; please ensure wrangler.toml has correct ids."
+    continue
   fi
 
   if [ -z "${preview_id}" ]; then

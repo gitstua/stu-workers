@@ -1,12 +1,40 @@
 import { v4 as uuidv4 } from 'uuid';
 
-/**
- * Creates a new poll with the given options
- * @param {Object} params Poll parameters including options, open and close times
- * @param {KVNamespace} kv The KV namespace to store the poll data
- * @returns {Object} The created poll object
- */
-export async function createPoll(params, kv) {
+async function ensureSchema(db) {
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS polls (
+            id TEXT PRIMARY KEY,
+            question TEXT NOT NULL,
+            open TEXT NOT NULL,
+            close TEXT NOT NULL,
+            durationSeconds INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    `).run();
+
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS poll_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poll_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            url TEXT,
+            votes INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+        );
+    `).run();
+
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS poll_voters (
+            poll_id TEXT NOT NULL,
+            voter_hash TEXT NOT NULL,
+            UNIQUE(poll_id, voter_hash)
+        );
+    `).run();
+}
+
+export async function createPoll(params, db) {
+    await ensureSchema(db);
     if (!params?.options || !Array.isArray(params.options) || params.options.length === 0) {
         throw new Error('Poll options are required');
     }
@@ -16,93 +44,137 @@ export async function createPoll(params, kv) {
     const durationSeconds = Number.isFinite(durationSecondsRaw) && durationSecondsRaw > 0
         ? Math.floor(durationSecondsRaw)
         : 30;
-    const id = uuidv4();
-    const poll = {
-        id,
-        question,
-        durationSeconds,
-        open: params.open || new Date().toISOString(),
-        close: params.close || new Date(Date.now() + 24*60*60*1000).toISOString(), // Default 24h from now
-        options: params.options.map(opt => ({
-            name: opt.name,
-            url: opt.url,
-            votes: 0
-        }))
-    };
+    const id = params.id || uuidv4();
+    const now = Date.now();
+    const open = params.open ? new Date(params.open).toISOString() : new Date(now).toISOString();
+    const close = params.close ? new Date(params.close).toISOString() : new Date(now + durationSeconds * 1000).toISOString();
 
-    await kv.put(id, JSON.stringify(poll));
+    await db.prepare(`
+        INSERT INTO polls (id, question, open, close, durationSeconds, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(id, question, open, close, durationSeconds, new Date(now).toISOString(), new Date(now).toISOString()).run();
 
-    console.log('Poll created:', poll);
-    console.log('KV binding:', kv);
+    const optionStatements = params.options
+        .map(opt => [opt.name, opt.url || ''])
+        .filter(([name]) => name && name.trim().length > 0)
+        .map(([name, url]) =>
+            db.prepare('INSERT INTO poll_options (poll_id, name, url, votes) VALUES (?, ?, ?, 0)').bind(id, name, url)
+        );
+    if (optionStatements.length === 0) {
+        throw new Error('Poll options are required');
+    }
+    await db.batch(optionStatements);
 
-    //read the poll from the kv
-    const pollData = await kv.get(id);
-    console.log('Poll data:', pollData);
-
-    return poll;
+    return await getPoll(id, db);
 }
 
-/**
- * Vote on a specific option in a poll
- * @param {string} pollId The ID of the poll
- * @param {number} optionIndex The index of the option to vote for
- * @param {KVNamespace} kv The KV namespace storing the poll data
- * @param {string} [voterHash] Optional hashed voter identifier to prevent repeat votes
- * @returns {Object} The updated poll object
- */
-export async function vote(pollId, optionIndex, kv, voterHash) {
-    const pollData = await kv.get(pollId);
-    if (!pollData) {
-        throw new Error('Poll not found');
-    }
+export async function vote(pollId, optionIndex, db, voterHash) {
+    await ensureSchema(db);
+    const poll = await getPoll(pollId, db);
+    const now = Date.now();
 
-    const poll = JSON.parse(pollData);
-    const now = new Date();
-    
-    if (new Date(poll.open) > now) {
+    if (new Date(poll.open).getTime() > now) {
         throw new Error('Poll has not opened yet');
     }
-    if (new Date(poll.close) < now) {
+    if (new Date(poll.close).getTime() < now) {
         throw new Error('Poll has closed');
     }
-    
     if (optionIndex < 0 || optionIndex >= poll.options.length) {
         throw new Error('Invalid option index');
     }
 
-    // Prevent repeat voting by storing a voter marker per poll
-    if (voterHash) {
-        const voterKey = `poll:${pollId}:voter:${voterHash}`;
-        const existing = await kv.get(voterKey);
-        if (existing) {
+    const targetOption = poll.options[optionIndex];
+
+    try {
+        const statements = [];
+        if (voterHash) {
+            statements.push(
+                db.prepare('INSERT INTO poll_voters (poll_id, voter_hash) VALUES (?, ?)').bind(pollId, voterHash)
+            );
+        }
+        statements.push(
+            db.prepare('UPDATE poll_options SET votes = votes + 1 WHERE id = ? AND poll_id = ?').bind(targetOption.id, pollId)
+        );
+        await db.batch(statements);
+    } catch (err) {
+        if (err && err.message && err.message.toLowerCase().includes('unique')) {
             throw new Error('You have already voted on this poll');
         }
-
-        // Expire the voter marker shortly after poll close to avoid stale data
-        const closeMs = new Date(poll.close).getTime();
-        const ttlSeconds = Number.isFinite(closeMs)
-            ? Math.max(60, Math.floor((closeMs - Date.now()) / 1000))
-            : 24 * 60 * 60; // default to 24h if close is invalid
-
-        await kv.put(voterKey, '1', { expirationTtl: ttlSeconds });
+        throw err;
     }
 
-    poll.options[optionIndex].votes++;
-    await kv.put(pollId, JSON.stringify(poll));
-    
+    return await getPoll(pollId, db);
+}
+
+export async function getPoll(pollId, db) {
+    await ensureSchema(db);
+    const pollRow = await db.prepare('SELECT * FROM polls WHERE id = ?').bind(pollId).first();
+    if (!pollRow) {
+        throw new Error('Poll not found');
+    }
+    const options = await db.prepare('SELECT id, name, url, votes FROM poll_options WHERE poll_id = ? ORDER BY id ASC').bind(pollId).all();
+    const poll = {
+        id: pollRow.id,
+        question: pollRow.question,
+        durationSeconds: pollRow.durationSeconds,
+        open: pollRow.open,
+        close: pollRow.close,
+        options: options.results || []
+    };
     return poll;
 }
 
-/**
- * Get a poll from the KV namespace
- * @param {string} pollId The ID of the poll
- * @param {KVNamespace} kv The KV namespace storing the poll data
- * @returns {Object} The parsed poll object
- */
-export async function getPoll(pollId, kv) {
-    const pollData = await kv.get(pollId);
-    if (!pollData) {
-        throw new Error('Poll not found');
+export async function listPolls(db) {
+    await ensureSchema(db);
+    const polls = await db.prepare('SELECT * FROM polls ORDER BY created_at DESC').all();
+    const pollRows = polls.results || [];
+    if (pollRows.length === 0) return [];
+
+    const ids = pollRows.map(p => p.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const optionResults = await db.prepare(
+        `SELECT id, poll_id, name, url, votes FROM poll_options WHERE poll_id IN (${placeholders}) ORDER BY id ASC`
+    ).bind(...ids).all();
+    const options = optionResults.results || [];
+
+    const grouped = {};
+    for (const opt of options) {
+        grouped[opt.poll_id] = grouped[opt.poll_id] || [];
+        grouped[opt.poll_id].push(opt);
     }
-    return JSON.parse(pollData);
-} 
+
+    return pollRows.map(p => ({
+        id: p.id,
+        question: p.question,
+        durationSeconds: p.durationSeconds,
+        open: p.open,
+        close: p.close,
+        options: grouped[p.id] || [],
+        totalVotes: (grouped[p.id] || []).reduce((s, o) => s + (o.votes || 0), 0)
+    }));
+}
+
+export async function resetPoll(pollId, db) {
+    await ensureSchema(db);
+    const poll = await getPoll(pollId, db);
+    const now = Date.now();
+    const newOpen = new Date(now).toISOString();
+    const newClose = new Date(now + (poll.durationSeconds || 30) * 1000).toISOString();
+
+    await db.batch([
+        db.prepare('UPDATE polls SET open = ?, close = ?, updated_at = ? WHERE id = ?').bind(newOpen, newClose, new Date(now).toISOString(), pollId),
+        db.prepare('UPDATE poll_options SET votes = 0 WHERE poll_id = ?').bind(pollId),
+        db.prepare('DELETE FROM poll_voters WHERE poll_id = ?').bind(pollId)
+    ]);
+
+    return await getPoll(pollId, db);
+}
+
+export async function deletePoll(pollId, db) {
+    await ensureSchema(db);
+    await db.batch([
+        db.prepare('DELETE FROM poll_voters WHERE poll_id = ?').bind(pollId),
+        db.prepare('DELETE FROM poll_options WHERE poll_id = ?').bind(pollId),
+        db.prepare('DELETE FROM polls WHERE id = ?').bind(pollId)
+    ]);
+}

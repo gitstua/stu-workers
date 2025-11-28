@@ -2,6 +2,11 @@ name = "stu-workers"
 main = "src/index.js"
 compatibility_date = "2025-02-15"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "stu-workers"
+database_id = "b44ec761-32e0-48ac-88df-54e585d42dd1"
+
 
 [vars]
 MASTER_KEY = "your-secret-key-here"  # Set this in your environment
@@ -9,14 +14,8 @@ RATE_LIMIT_PER_IP = "200"  # Can be overridden in the Cloudflare dashboard
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "fb6569b345384a18ad8afcbf52d2c987"
+id = "6fd047f6e0e848b4ad7e36d62bd88788"
 preview_id = "7f7bfbddb4dc462c8fa3947e63b9c12a"
-
-[[kv_namespaces]]
-binding = "POLLS"
-id = "24b31e8bb7ea459c95c384478e8c227e"
-preview_id = "26ebe5c63f8c413faeaada64667ef1b0"
-
 
 [build]
 command = "npm install"

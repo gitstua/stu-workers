@@ -10,6 +10,7 @@ A Cloudflare Worker that demonstrates a variety of features.
 - `/xml-to-json` XML to JSON conversion endpoint (limited to certain hostnames)
 - `/poll/app?id=<poll-id>` Single-page voting UI for an existing poll
 - `/poll/admin` (auth required) returns all polls with totals; `/poll/admin/delete` deletes a poll; `/poll/admin/spa` serves an admin UI (pass API key via `key` query or header); `/poll/admin/save` creates or updates a poll
+- Poll data is stored in D1 (bind as `DB` in `wrangler.toml`)
 
 ## Endpoints
 
@@ -144,6 +145,12 @@ GET /status
 ## Running Locally
 
 To run this project locally, follow these steps:
+
+0. **Create D1 database** (one-time, for production deploys):
+   ```bash
+   npx wrangler d1 create stu-workers
+   ```
+   Copy the `database_id` into `wrangler.toml` under the `DB` binding. Local `wrangler dev --local` will use an embedded SQLite shim automatically.
 
 1. **Install Wrangler CLI** if you haven't already:
    ```bash

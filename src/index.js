@@ -30,7 +30,7 @@ import { checkRateLimit } from './rateLimit';
 import { createMinimalBMP } from './imageGenerators/bmp';
 import { createMinimalPNG } from './imageGenerators/png';
 import { generateFractal } from './fractal';
-import { createPoll, vote } from './poll';
+import { createPoll, vote, getPoll, listPolls, resetPoll, deletePoll } from './poll';
 import { withApiKeyValidation } from './middleware/validateApiKey';
 
 function getClientFingerprint(request) {
@@ -104,19 +104,6 @@ export default {
 		const url = new URL(request.url);
 		let response;
 
-		//chec the binding of KV
-		console.log(env.POLLS);
-		console.log(env.RATE_LIMIT);
-
-		try {
-			await env.POLLS.put('test-key', 'test-value');
-			const value = await env.POLLS.get('test-key');
-			console.log('KV test successful:', value);
-			console.log('env.POLLS binding:', env.POLLS);
-		} catch (error) {
-			console.error('KV test failed:', error);
-		}
-		
 		if (url.pathname === '/') {
 			response = await handleRequest(request);
 		} else if (url.pathname === '/robots.txt') {
@@ -138,11 +125,11 @@ export default {
 			response = await handleVoteRequest(request, env);
 		} else if (url.pathname === '/poll/results/json') {
 			response = await handlePollResultsJson(request, env);
-	} else if (url.pathname === '/poll/results/html') {
-		response = await handlePollResultsHtml(request, env);
-	} else if (url.pathname === '/poll/app') {
-		const html = renderPollSpa(url);
-		response = new Response(html, {
+		} else if (url.pathname === '/poll/results/html') {
+			response = await handlePollResultsHtml(request, env);
+		} else if (url.pathname === '/poll/app') {
+			const html = renderPollSpa(url);
+			response = new Response(html, {
 				headers: {
 					'Content-Type': 'text/html; charset=utf-8',
 					'Cache-Control': 'no-store'
@@ -201,15 +188,6 @@ export default {
 		// GLOBAL: Clone the response and set the X-Robots-Tag header for all pages
 		const newResponse = new Response(response.body, response);
 		newResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
-
-		// Add this after the console.log statements
-		try {
-			await env.POLLS.put('test-key', 'test-value');
-			const value = await env.POLLS.get('test-key');
-			console.log('KV test successful:', value);
-		} catch (error) {
-			console.error('KV test failed:', error);
-		}
 
 		return newResponse;
 	}
@@ -391,7 +369,7 @@ async function handleXmlRequest(request, env) {
 async function handleCreatePollRequest(request, env) {
 	try {
 		const params = await request.json();
-		const poll = await createPoll(params, env.POLLS);
+		const poll = await createPoll(params, env.DB);
 		
 		return new Response(JSON.stringify(poll), {
 			headers: { 'Content-Type': 'application/json' }
@@ -406,36 +384,9 @@ async function handleCreatePollRequest(request, env) {
 
 async function handleGetAllPolls(request, env) {
 	try {
-		const polls = await env.POLLS.list();
-		const allPolls = [];  // Changed variable name to avoid conflict
-		
-		for (const poll of polls.keys) {
-			console.log(`about to get poll ${poll.name}`);
-			const pollData = await env.POLLS.get(poll.name);
+		const polls = await listPolls(env.DB);
 
-			//if the pollData is null or not valid json, skip it
-			if (pollData === null || pollData === undefined || pollData === '') {
-				continue;
-			}
-
-			//check if the pollData is valid json
-			try {
-				const pollDataParsed = JSON.parse(pollData);
-				allPolls.push(pollDataParsed);
-			} catch (error) {
-				console.error('Error parsing poll data:', error);
-				continue;
-			}
-
-			//sort the pollData by closedAt date so the latest poll is first
-			allPolls.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
-
-			//parse the pollData
-			const pollDataParsed = JSON.parse(pollData);
-			allPolls.push(JSON.parse(pollData));
-		}
-
-		return new Response(JSON.stringify(allPolls), {
+		return new Response(JSON.stringify(polls), {
 			headers: { 'Content-Type': 'application/json' }
 		});
 	} catch (error) {
@@ -460,7 +411,7 @@ async function handleVoteRequest(request, env) {
 		}
 
 		const voterHash = await createVoterHash(pollId, request, env);
-		const updatedPoll = await vote(pollId, optionIndex, env.POLLS, voterHash);
+		const updatedPoll = await vote(pollId, optionIndex, env.DB, voterHash);
 		
 		return new Response(JSON.stringify(updatedPoll), {
 			headers: { 'Content-Type': 'application/json' }
@@ -488,12 +439,9 @@ async function handlePollResultsJson(request, env) {
 			return new Response('Poll ID is required', { status: 400 });
 		}
 
-		const pollData = await env.POLLS.get(pollId);
-		if (!pollData) {
-			return new Response('Poll not found', { status: 404 });
-		}
+		const poll = await getPoll(pollId, env.DB);
 
-		return new Response(pollData, {
+		return new Response(JSON.stringify(poll), {
 			headers: { 'Content-Type': 'application/json' }
 		});
 	} catch (error) {
@@ -514,36 +462,7 @@ async function handleResetPollRequest(request, env) {
 			});
 		}
 
-		const pollData = await env.POLLS.get(pollId);
-		if (!pollData) {
-			return new Response(JSON.stringify({ error: 'Poll not found' }), {
-				status: 404,
-				headers: { 'Content-Type': 'application/json' }
-			});
-		}
-
-		const poll = JSON.parse(pollData);
-		const now = Date.now();
-		const durationMs = (Number(poll.durationSeconds) || 30) * 1000;
-
-		poll.open = new Date(now).toISOString();
-		poll.close = new Date(now + durationMs).toISOString();
-		poll.options = poll.options.map(opt => ({ ...opt, votes: 0 }));
-
-		// Clear voter markers so users can vote again
-		let cursor;
-		do {
-			const listResult = await env.POLLS.list({
-				prefix: `poll:${pollId}:voter:`,
-				cursor
-			});
-			for (const key of listResult.keys) {
-				await env.POLLS.delete(key.name);
-			}
-			cursor = listResult.cursor;
-		} while (cursor);
-
-		await env.POLLS.put(pollId, JSON.stringify(poll));
+		const poll = await resetPoll(pollId, env.DB);
 
 		return new Response(JSON.stringify(poll), {
 			headers: { 'Content-Type': 'application/json' }
@@ -557,23 +476,7 @@ async function handleResetPollRequest(request, env) {
 }
 
 async function handleAdminListPolls(env) {
-	const polls = await env.POLLS.list();
-	const results = [];
-	for (const key of polls.keys) {
-		if (key.name.startsWith('poll:') && key.name.includes(':voter:')) {
-			continue; // skip voter markers
-		}
-		const data = await env.POLLS.get(key.name);
-		if (!data) continue;
-		try {
-			const poll = JSON.parse(data);
-			const totalVotes = poll.options?.reduce((s, o) => s + (o.votes || 0), 0) || 0;
-			results.push({ ...poll, totalVotes });
-		} catch (err) {
-			console.error('Error parsing poll for admin list', key.name, err);
-			continue;
-		}
-	}
+	const results = await listPolls(env.DB);
 	return new Response(JSON.stringify(results), {
 		headers: { 'Content-Type': 'application/json' }
 	});
@@ -589,20 +492,7 @@ async function handleAdminDeletePoll(request, env) {
 			});
 		}
 
-		await env.POLLS.delete(pollId);
-
-		// Remove voter markers
-		let cursor;
-		do {
-			const listResult = await env.POLLS.list({
-				prefix: `poll:${pollId}:voter:`,
-				cursor
-			});
-			for (const key of listResult.keys) {
-				await env.POLLS.delete(key.name);
-			}
-			cursor = listResult.cursor;
-		} while (cursor);
+		await deletePoll(pollId, env.DB);
 
 		return new Response(JSON.stringify({ ok: true, deleted: pollId }), {
 			headers: { 'Content-Type': 'application/json' }
@@ -644,38 +534,20 @@ async function handleAdminSavePoll(request, env) {
 		let openDate = open ? new Date(open) : new Date(now);
 		let closeDate = close ? new Date(close) : new Date(now + durationMs);
 
-		let poll;
 		if (id) {
-			const existing = await env.POLLS.get(id);
-			if (!existing) {
-				return new Response(JSON.stringify({ error: 'Poll not found' }), {
-					status: 404,
-					headers: { 'Content-Type': 'application/json' }
-				});
-			}
-			poll = {
-				id,
-				question: (question || '').trim() || 'Untitled poll',
-				durationSeconds: Number(durationSeconds) || 30,
-				open: openDate.toISOString(),
-				close: closeDate.toISOString(),
-				options: sanitizedOptions
-			};
-		} else {
-			const params = {
-				question,
-				open: openDate.toISOString(),
-				close: closeDate.toISOString(),
-				durationSeconds: Number(durationSeconds) || 30,
-				options: sanitizedOptions
-			};
-			poll = await createPoll(params, env.POLLS);
-			return new Response(JSON.stringify(poll), {
-				headers: { 'Content-Type': 'application/json' }
-			});
+			await deletePoll(id, env.DB);
 		}
 
-		await env.POLLS.put(id, JSON.stringify(poll));
+		const params = {
+			id,
+			question,
+			open: openDate.toISOString(),
+			close: closeDate.toISOString(),
+			durationSeconds: Number(durationSeconds) || 30,
+			options: sanitizedOptions
+		};
+		const poll = await createPoll(params, env.DB);
+
 		return new Response(JSON.stringify(poll), {
 			headers: { 'Content-Type': 'application/json' }
 		});
@@ -695,12 +567,7 @@ async function handlePollResultsHtml(request, env) {
 			return new Response('Poll ID is required', { status: 400 });
 		}
 
-		const pollData = await env.POLLS.get(pollId);
-		if (!pollData) {
-			return new Response('Poll not found', { status: 404 });
-		}
-
-		const poll = JSON.parse(pollData);
+		const poll = await getPoll(pollId, env.DB);
 		const totalVotes = poll.options.reduce((sum, opt) => sum + opt.votes, 0);
 
 		const html = `
