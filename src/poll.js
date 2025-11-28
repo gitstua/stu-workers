@@ -7,9 +7,20 @@ import { v4 as uuidv4 } from 'uuid';
  * @returns {Object} The created poll object
  */
 export async function createPoll(params, kv) {
+    if (!params?.options || !Array.isArray(params.options) || params.options.length === 0) {
+        throw new Error('Poll options are required');
+    }
+
+    const question = (params.question || '').trim() || 'Untitled poll';
+    const durationSecondsRaw = Number(params.durationSeconds);
+    const durationSeconds = Number.isFinite(durationSecondsRaw) && durationSecondsRaw > 0
+        ? Math.floor(durationSecondsRaw)
+        : 30;
     const id = uuidv4();
     const poll = {
         id,
+        question,
+        durationSeconds,
         open: params.open || new Date().toISOString(),
         close: params.close || new Date(Date.now() + 24*60*60*1000).toISOString(), // Default 24h from now
         options: params.options.map(opt => ({
@@ -36,9 +47,10 @@ export async function createPoll(params, kv) {
  * @param {string} pollId The ID of the poll
  * @param {number} optionIndex The index of the option to vote for
  * @param {KVNamespace} kv The KV namespace storing the poll data
+ * @param {string} [voterHash] Optional hashed voter identifier to prevent repeat votes
  * @returns {Object} The updated poll object
  */
-export async function vote(pollId, optionIndex, kv) {
+export async function vote(pollId, optionIndex, kv, voterHash) {
     const pollData = await kv.get(pollId);
     if (!pollData) {
         throw new Error('Poll not found');
@@ -56,6 +68,23 @@ export async function vote(pollId, optionIndex, kv) {
     
     if (optionIndex < 0 || optionIndex >= poll.options.length) {
         throw new Error('Invalid option index');
+    }
+
+    // Prevent repeat voting by storing a voter marker per poll
+    if (voterHash) {
+        const voterKey = `poll:${pollId}:voter:${voterHash}`;
+        const existing = await kv.get(voterKey);
+        if (existing) {
+            throw new Error('You have already voted on this poll');
+        }
+
+        // Expire the voter marker shortly after poll close to avoid stale data
+        const closeMs = new Date(poll.close).getTime();
+        const ttlSeconds = Number.isFinite(closeMs)
+            ? Math.max(60, Math.floor((closeMs - Date.now()) / 1000))
+            : 24 * 60 * 60; // default to 24h if close is invalid
+
+        await kv.put(voterKey, '1', { expirationTtl: ttlSeconds });
     }
 
     poll.options[optionIndex].votes++;

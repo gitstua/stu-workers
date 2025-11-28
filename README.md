@@ -8,6 +8,8 @@ A Cloudflare Worker that demonstrates a variety of features.
 - `/fractal` Generates Mandelbrot and Julia set fractals
 - `/ndjson-to-json` NDJSON to JSON conversion endpoint (limited to certain hostnames)
 - `/xml-to-json` XML to JSON conversion endpoint (limited to certain hostnames)
+- `/poll/app?id=<poll-id>` Single-page voting UI for an existing poll
+- `/poll/admin` (auth required) returns all polls with totals; `/poll/admin/delete` deletes a poll; `/poll/admin/spa` serves an admin UI (pass API key via `key` query or header); `/poll/admin/save` creates or updates a poll
 
 ## Endpoints
 
@@ -54,11 +56,15 @@ Endpoints for creating and voting in polls (e.g. for deciding what's for dinner)
 
 #### /poll/new
 Creates a new poll with options and voting timeframe.
+- Accepts a `question` string plus `options` array; defaults to "Untitled poll" if not provided.
+- Optional `durationSeconds` (default 30) used by the SPA countdown.
 
 Example request:
 ```json
 POST /poll/new
 {
+    "question": "What should we have for dinner?",
+    "durationSeconds": 30,
     "options": [
         {"name": "Pizza", "url": "https://example.com/pizza"},
         {"name": "Sushi", "url": "https://example.com/sushi"},
@@ -73,6 +79,8 @@ Response:
 ```json
 {
     "id": "123e4567-e89b-12d3-a456-426614174000",
+    "question": "What should we have for dinner?",
+    "durationSeconds": 30,
     "open": "2024-03-20T18:00:00Z",
     "close": "2024-03-20T20:00:00Z",
     "options": [
@@ -99,6 +107,8 @@ Response:
 ```json
 {
     "id": "123e4567-e89b-12d3-a456-426614174000",
+    "question": "What should we have for dinner?",
+    "durationSeconds": 30,
     "open": "2024-03-20T18:00:00Z",
     "close": "2024-03-20T20:00:00Z",
     "options": [
@@ -108,6 +118,10 @@ Response:
     ]
 }
 ```
+- Voting is limited to one vote per client fingerprint (hashed IP/User-Agent), enforced via KV markers per poll.
+- `/poll/app?id=<poll-id>` serves an inline HTML/JS SPA to load a poll, cast a vote, and view results; it counts down to the poll's `close` time (fallback to `durationSeconds`, default 30), hides per-option counts until a brief drum roll finishes, then reveals totals sorted top-first.
+- `/poll/reset` resets an existing poll (auth required): sets `open` to now, `close` to now + `durationSeconds`, zeroes all votes, and clears voter markers so users can vote again. Body: `{ "pollId": "<id>" }`
+- `/poll/admin` (auth required) returns all polls with totals; `/poll/admin/delete` deletes a poll; `/poll/admin/spa` serves an admin UI (pass API key via `key` query or header)
 
 ## Examples 
 
@@ -150,3 +164,22 @@ To run this project locally, follow these steps:
 
 This will start a local development server, typically at `http://127.0.0.1:8787`. Any changes you make to the code will be automatically reflected.
 
+### Poll API local demo
+
+Run `scripts/poll-api-demo.sh` to spin up `wrangler dev --local`, seed a sample poll, cast a vote, and dump the JSON results. The script:
+- pulls `MASTER_KEY` from your shell or `wrangler.toml`, generates a valid API key using the same HMAC logic as `src/middleware/validateApiKey.js`, and sends it in `X-API-Key`
+- forces `ENVIRONMENT=development`/`NODE_ENV=development` bindings for local runs
+- persists KV data to `.wrangler/state` so you can rerun and inspect stored polls
+- writes wrangler logs to `/tmp/stu-workers-wrangler.log` while streaming curl responses to the console
+- casts sample votes showing duplicate rejection for the same fingerprint and acceptance for a different fingerprint, then dumps JSON results
+- calls `/poll/reset` (authenticated) to zero votes and restart the timer, then prints reset results
+
+Set `MASTER_KEY` for local runs by either exporting it (`export MASTER_KEY="something-secret"`), adding `MASTER_KEY=...` to a `.env` file in the repo root, or editing the `MASTER_KEY` value in `wrangler.toml`. The demo script checks in that order.
+
+### Poll SPA local demo
+
+Run `scripts/poll-spa-demo.sh` to start `wrangler dev --local`, create a sample poll, and print the SPA URL (e.g. `http://127.0.0.1:8787/poll/app?id=<poll-id>`) so you can vote and view results in the browser. It keeps wrangler running until you press Ctrl+C. Requires `MASTER_KEY` (env, `.env`, or `wrangler.toml`).
+
+### Poll load test
+
+Run `scripts/poll-loadtest.sh` with `POLL_ID=<id>` (and optional `WORKER_URL`) to fire 100 random votes into an existing poll while printing the SPA URL so you can watch live results.

@@ -9,12 +9,11 @@
   },
   "dependencies": {
     "fast-xml-parser": "^4.0.0",
-    "uuid": "^9.0.0",
-    "luxon": "^3.4.4"
+    "luxon": "^3.4.4",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "wrangler": "3.109.1",
-    "dotenv": "^16.4.1"
-
+    "dotenv": "^16.4.1",
+    "wrangler": "^4.51.0"
   }
 }

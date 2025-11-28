@@ -7,18 +7,15 @@ compatibility_date = "2025-02-15"
 MASTER_KEY = "your-secret-key-here"  # Set this in your environment
 RATE_LIMIT_PER_IP = "200"  # Can be overridden in the Cloudflare dashboard
 
-[limits]
-  cpu_ms = 50       # Maximum CPU time for Paid Plan (in milliseconds)
-  memory_mb = 256   # Maximum memory for Paid Plan (in megabytes)
-
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "cfd02f5c441542c3be646a750c452848"
-preview_id = "d4fac48901c843afbbf4769fbebcdac5"
+id = "fb6569b345384a18ad8afcbf52d2c987"
+preview_id = "7f7bfbddb4dc462c8fa3947e63b9c12a"
 
 [[kv_namespaces]]
 binding = "POLLS"
-id = "5c9d283af671413287514d4b77039d84"
+id = "24b31e8bb7ea459c95c384478e8c227e"
+preview_id = "26ebe5c63f8c413faeaada64667ef1b0"
 
 
 [build]
