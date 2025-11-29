@@ -1191,6 +1191,27 @@ function renderAdminPollSpa(url) {
         els.formArea.style.display = 'grid';
       }
 
+      function formatClose(close) {
+        if (!close) return 'n/a';
+        const closeMs = Date.parse(close);
+        if (!Number.isFinite(closeMs)) return close;
+        const diff = closeMs - Date.now();
+        if (diff <= 0) return 'Closed';
+        const minutes = Math.floor(diff / 60000);
+        if (minutes > 300) {
+          try {
+            return new Date(closeMs).toLocaleString();
+          } catch {
+            return close;
+          }
+        }
+        if (minutes >= 1) {
+          return minutes + ' minute(s)';
+        }
+        const seconds = Math.max(1, Math.floor(diff / 1000));
+        return seconds + ' second(s)';
+      }
+
       function renderRows(polls, apiKey) {
         if (!polls.length) {
           els.rows.innerHTML = '<tr><td colspan="4">No polls found.</td></tr>';
@@ -1203,7 +1224,7 @@ function renderAdminPollSpa(url) {
             '<tr>',
             '<td><div style="font-weight:700;">', p.question || 'Untitled question', '</div><div class="pill">', p.id, '</div></td>',
             '<td>', total, '</td>',
-            '<td>', p.close || 'n/a', '</td>',
+            '<td>', formatClose(p.close), '</td>',
             '<td>',
               '<a class="pill" href="', appUrl, '" target="_blank">Open</a> ',
               '<button class="btn" data-action="edit" data-id="', p.id, '">Edit</button>',
