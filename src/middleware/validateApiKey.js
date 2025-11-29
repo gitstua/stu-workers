@@ -43,14 +43,17 @@ export async function validateApiKey(request, env) {
         
         // Split the key into its components
         const parts = apiKey.split('_');
-        if (parts.length !== 4) {
+        if (parts.length !== 4 && parts.length !== 5) {
             return {
                 valid: false,
                 error: 'Invalid API key format'
             };
         }
         
-        const [prefix, random, expiry, providedSignature] = parts;
+        const [prefix, random, expiry, maybeResourceOrSig, maybeSig] = parts;
+        const hasResource = parts.length === 5;
+        const resource = hasResource ? maybeResourceOrSig : null;
+        const providedSignature = hasResource ? maybeSig : maybeResourceOrSig;
         
         // Validate prefix
         if (prefix !== 'stucal') {
@@ -77,7 +80,9 @@ export async function validateApiKey(request, env) {
         }
         
         // Validate signature
-        const keyContent = `${prefix}_${random}_${expiry}`;
+        const keyContent = hasResource
+            ? `${prefix}_${random}_${expiry}_${resource}`
+            : `${prefix}_${random}_${expiry}`;
         const encoder = new TextEncoder();
         const keyData = encoder.encode(env.MASTER_KEY.slice(0, 3));
         const messageData = encoder.encode(keyContent);
@@ -108,7 +113,7 @@ export async function validateApiKey(request, env) {
             };
         }
 
-        return { valid: true };
+        return { valid: true, resource };
     } catch (error) {
         console.error('Validation error:', error.message);
         return {
@@ -126,7 +131,7 @@ export async function validateApiKey(request, env) {
  */
 export function withApiKeyValidation(handler) {
     return async (request, env, ctx) => {
-        const { valid, error } = await validateApiKey(request, env);
+        const { valid, error, resource } = await validateApiKey(request, env);
         
         if (!valid) {
             const status = error.includes('No API key provided') ? 401 : 403;
@@ -142,6 +147,6 @@ export function withApiKeyValidation(handler) {
             });
         }
 
-        return handler(request, env, ctx);
+        return handler(request, env, ctx, resource);
     };
-} 
+}

@@ -138,28 +138,28 @@ export default {
 
 			// BELOW ARE PROTECTED ROUTES THAT REQUIRE AN API KEY
 		} else if (url.pathname === '/poll/new') {
-			const handler = async (request, env, ctx) => {
-				return await handleCreatePollRequest(request, env);
+			const handler = async (request, env, ctx, resource) => {
+				return await handleCreatePollRequest(request, env, resource);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/poll/reset') {
-			const handler = async (request, env, ctx) => {
-				return await handleResetPollRequest(request, env);
+			const handler = async (request, env, ctx, resource) => {
+				return await handleResetPollRequest(request, env, resource);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/poll/admin') {
-			const handler = async (request, env, ctx) => {
-				return await handleAdminListPolls(env);
+			const handler = async (request, env, ctx, resource) => {
+				return await handleAdminListPolls(env, resource);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/poll/admin/delete') {
-			const handler = async (request, env, ctx) => {
-				return await handleAdminDeletePoll(request, env);
+			const handler = async (request, env, ctx, resource) => {
+				return await handleAdminDeletePoll(request, env, resource);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/poll/admin/save') {
-			const handler = async (request, env, ctx) => {
-				return await handleAdminSavePoll(request, env);
+			const handler = async (request, env, ctx, resource) => {
+				return await handleAdminSavePoll(request, env, resource);
 			};
 			response = await withApiKeyValidation(handler)(request, env, ctx);
 		} else if (url.pathname === '/poll/admin/spa') {
@@ -366,9 +366,13 @@ async function handleXmlRequest(request, env) {
 	}
 }
 
-async function handleCreatePollRequest(request, env) {
+async function handleCreatePollRequest(request, env, resource) {
 	try {
 		const params = await request.json();
+		// If resource-scoped key present, force id to match
+		if (resource) {
+			params.id = resource;
+		}
 		const poll = await createPoll(params, env.DB);
 		
 		return new Response(JSON.stringify(poll), {
@@ -382,9 +386,17 @@ async function handleCreatePollRequest(request, env) {
 	}
 }
 
-async function handleGetAllPolls(request, env) {
+async function handleGetAllPolls(request, env, resource) {
 	try {
-		const polls = await listPolls(env.DB);
+		let polls = await listPolls(env.DB);
+		if (resource) {
+			polls = polls.filter(p => p.id === resource);
+			if (polls.length === 0) {
+				return new Response(JSON.stringify([]), {
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+		}
 
 		return new Response(JSON.stringify(polls), {
 			headers: { 'Content-Type': 'application/json' }
@@ -452,12 +464,19 @@ async function handlePollResultsJson(request, env) {
 	}
 }
 
-async function handleResetPollRequest(request, env) {
+async function handleResetPollRequest(request, env, resource) {
 	try {
 		const { pollId } = await request.json();
 		if (!pollId) {
 			return new Response(JSON.stringify({ error: 'pollId is required' }), {
 				status: 400,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		if (resource && resource !== pollId) {
+			return new Response(JSON.stringify({ error: 'Not allowed for this pollId' }), {
+				status: 403,
 				headers: { 'Content-Type': 'application/json' }
 			});
 		}
@@ -475,19 +494,29 @@ async function handleResetPollRequest(request, env) {
 	}
 }
 
-async function handleAdminListPolls(env) {
-	const results = await listPolls(env.DB);
+async function handleAdminListPolls(env, resource) {
+	let results = await listPolls(env.DB);
+	if (resource) {
+		results = results.filter(p => p.id === resource);
+	}
 	return new Response(JSON.stringify(results), {
 		headers: { 'Content-Type': 'application/json' }
 	});
 }
 
-async function handleAdminDeletePoll(request, env) {
+async function handleAdminDeletePoll(request, env, resource) {
 	try {
 		const { pollId } = await request.json();
 		if (!pollId) {
 			return new Response(JSON.stringify({ error: 'pollId is required' }), {
 				status: 400,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		if (resource && resource !== pollId) {
+			return new Response(JSON.stringify({ error: 'Not allowed for this pollId' }), {
+				status: 403,
 				headers: { 'Content-Type': 'application/json' }
 			});
 		}
@@ -505,7 +534,7 @@ async function handleAdminDeletePoll(request, env) {
 	}
 }
 
-async function handleAdminSavePoll(request, env) {
+async function handleAdminSavePoll(request, env, resource) {
 	try {
 		const body = await request.json();
 		const { id, question, options, durationSeconds, open, close } = body || {};
@@ -534,12 +563,21 @@ async function handleAdminSavePoll(request, env) {
 		let openDate = open ? new Date(open) : new Date(now);
 		let closeDate = close ? new Date(close) : new Date(now + durationMs);
 
-		if (id) {
+		if (resource && id && resource !== id) {
+			return new Response(JSON.stringify({ error: 'Not allowed for this pollId' }), {
+				status: 403,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		let targetId = id || resource;
+
+		if (targetId) {
 			await deletePoll(id, env.DB);
 		}
 
 		const params = {
-			id,
+			id: targetId,
 			question,
 			open: openDate.toISOString(),
 			close: closeDate.toISOString(),
@@ -685,8 +723,8 @@ function renderPollSpa(url) {
     .votes { color: var(--muted); font-size: 13px; }
     .bar { width: 100%; height: 8px; border-radius: 999px; background: #121c3c; overflow: hidden; }
     .bar span { display: block; height: 100%; background: linear-gradient(120deg, var(--accent), var(--accent-2)); }
-    .status { margin: 6px 0 0; color: var(--muted); font-size: 14px; min-height: 18px; }
-    .status.error { color: var(--danger); }
+    .status { margin: 6px 0 0; color: #ffffff; font-size: 16px; min-height: 18px; }
+    .status.error { color: #ff8c7b; }
     .actions { display: flex; justify-content: flex-end; margin-top: 8px; }
     .badge { padding: 6px 10px; border-radius: 8px; background: #132043; color: var(--text); font-weight: 700; }
   </style>
@@ -694,8 +732,8 @@ function renderPollSpa(url) {
 <body>
   <div class="shell">
     <header>
-      <h1 id="title-question">Poll Vote</h1>
-      <p class="lead" id="title-sub">Load a poll and vote before time runs out.</p>
+      <h1 id="title-question">Question</h1>
+      <p class="lead" id="title-sub">Load a question and vote before time runs out.</p>
     </header>
 
     <div class="card">
@@ -722,7 +760,8 @@ function renderPollSpa(url) {
         endsAt: null,
         timers: { refresh: null, countdown: null, drumroll: null },
         confettiShown: false,
-        votedOption: null
+        votedOption: null,
+        drumCount: 0
       };
 
       const els = {
@@ -756,7 +795,14 @@ function renderPollSpa(url) {
         if (!state.poll) return [];
         const opts = [...state.poll.options];
         if (state.phase === 'reveal') {
-          return opts.sort((a,b) => (b.votes || 0) - (a.votes || 0));
+          return opts.sort((a, b) => {
+            const vb = b.votes || 0;
+            const va = a.votes || 0;
+            if (vb !== va) return vb - va;
+            const idA = typeof a.id === 'number' ? a.id : Number(a.id) || 0;
+            const idB = typeof b.id === 'number' ? b.id : Number(b.id) || 0;
+            return idA - idB;
+          });
         }
         return opts;
       }
@@ -764,15 +810,15 @@ function renderPollSpa(url) {
       function renderPoll() {
         const poll = state.poll;
         if (!poll) {
-          els.options.innerHTML = '<div class="status">No poll loaded.</div>';
-          els.title.textContent = 'Poll Vote';
-          els.subtitle.textContent = state.pollId ? 'Loading poll...' : 'Add ?id=<poll-id> to the URL.';
+          els.options.innerHTML = '<div class="status">No question loaded.</div>';
+          els.title.textContent = 'Question';
+          els.subtitle.textContent = state.pollId ? 'Loading question...' : 'Add ?id=<poll-id> to the URL.';
           els.countdown.textContent = 'Countdown: --';
           els.total.textContent = 'Total votes: --';
           return;
         }
 
-        els.title.textContent = poll.question || 'Poll Vote';
+        els.title.textContent = poll.question || 'Question';
         els.subtitle.textContent = state.phase === 'reveal'
           ? 'Results locked in.'
           : state.phase === 'drumroll'
@@ -795,18 +841,27 @@ function renderPollSpa(url) {
 
         const opts = viewOptions();
         els.options.innerHTML = opts.map((opt, idx) => {
-          const isChosen = state.votedOption === idx;
+          const isWinner = state.phase === 'reveal' && idx === 0;
+          const isChosen = state.phase !== 'reveal' && state.votedOption === idx;
           const pct = total > 0 ? Math.round(((opt.votes || 0) / total) * 100) : 0;
-          const votesLabel = showNumbers ? (opt.votes || 0) + ' vote(s) · ' + pct + '%' : 'Votes hidden until reveal';
+          const votesLabel = showNumbers
+            ? (opt.votes || 0) + ' vote(s) · ' + pct + '%'
+            : (state.votedOption === idx ? 'You selected this option.' : '');
           const disableAll = state.votedOption !== null || state.phase !== 'countdown';
           const disabled = disableAll ? 'disabled' : '';
           const orderBadge = state.phase === 'reveal' ? '<span class="badge">#' + (idx + 1) + '</span>' : '';
-          const optionClass = (state.votedOption !== null && state.votedOption !== idx ? 'disabled ' : '') + (isChosen ? 'selected' : '');
+          let optionClass = '';
+          if (state.phase === 'reveal') {
+            optionClass = isWinner ? 'selected' : '';
+          } else {
+            if (state.votedOption !== null && state.votedOption !== idx) optionClass += 'disabled ';
+            if (isChosen) optionClass += 'selected';
+          }
           return [
             '<label class="option ', optionClass, '">',
               '<input type="radio" name="option" value="', idx, '" ', state.selected === idx ? 'checked' : '', ' ', disabled, ' style="margin-right:10px;">',
               '<div class="meta">',
-                '<div class="name">', opt.name, '</div>',
+                '<div class="name">', (isWinner ? '<strong>🏆🎉 Winner:</strong> ' : ''), opt.name, '</div>',
                 '<div class="bar"><span style="width:', showNumbers ? pct : 0, '%;"></span></div>',
                 '<div class="votes">', votesLabel, '</div>',
               '</div>',
@@ -822,9 +877,11 @@ function renderPollSpa(url) {
         });
 
         if (state.phase === 'drumroll') {
-          setStatus('Drum roll....', false);
+          state.drumCount += 1;
+          const drums = ' 🥁'.repeat(Math.min(state.drumCount, 20));
+          setStatus('Drum roll...' + drums, false);
         } else if (state.phase === 'reveal') {
-          setStatus('Results revealed.', false);
+          setStatus('Question has ended. The winner is...', false);
           if (!state.confettiShown) {
             state.confettiShown = true;
             triggerConfetti();
@@ -880,6 +937,7 @@ function renderPollSpa(url) {
       function startCountdown() {
         if (!state.poll) return;
         clearTimers();
+        state.confettiShown = false;
         const durationMs = (Number(state.poll.durationSeconds) || 30) * 1000;
         const openMs = Date.parse(state.poll.open || '');
         const closeMs = Date.parse(state.poll.close || '');
@@ -895,6 +953,7 @@ function renderPollSpa(url) {
 
         if (state.endsAt <= Date.now()) {
           state.phase = 'drumroll';
+          state.drumCount = 0;
           renderPoll();
           state.timers.drumroll = setTimeout(() => revealResults(), DRUMROLL_MS);
           return;
@@ -920,10 +979,22 @@ function renderPollSpa(url) {
       async function revealResults() {
         state.phase = 'reveal';
         await fetchPollOnce(false);
+        if (!state.confettiShown) {
+          state.confettiShown = true;
+          triggerConfetti();
+        }
         renderPoll();
       }
 
       els.voteBtn.addEventListener('click', submitVote);
+      const updateVoteBtnVisibility = () => {
+        els.voteBtn.style.display = (state.phase === 'drumroll' || state.phase === 'reveal') ? 'none' : 'inline-block';
+      };
+      const _renderPollOrig = renderPoll;
+      renderPoll = function() {
+        _renderPollOrig();
+        updateVoteBtnVisibility();
+      };
 
       function triggerConfetti() {
         const container = document.querySelector('.shell');
@@ -950,7 +1021,7 @@ function renderPollSpa(url) {
         setStatus('Loading poll...');
         fetchPollOnce(true).then(() => { if (state.poll) startCountdown(); });
       } else {
-        setStatus('No poll id in URL. Add ?id=<poll-id>.', true);
+        setStatus('No question id in URL. Add ?id=<poll-id>.', true);
         renderPoll();
       }
     })();
@@ -966,7 +1037,7 @@ function renderAdminPollSpa(url) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Poll Admin</title>
+  <title>Question Admin</title>
   <style>
     body { font-family: "Inter", system-ui, -apple-system, sans-serif; background: #0b1021; color: #e9eef9; margin:0; padding:24px; }
     h1 { margin: 0 0 12px; }
@@ -978,39 +1049,46 @@ function renderAdminPollSpa(url) {
     .btn { background: linear-gradient(120deg, #7be0ad, #6ca0ff); color: #0b1021; }
     .btn-danger { background: #ff8c7b; color: #0b1021; }
     .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#101a33; border:1px solid #1f2c52; color:#9aa6c2; font-size:12px; }
-    .status { margin: 8px 0 12px; color: #9aa6c2; }
+    .status { margin: 8px 0 12px; color: #ffffff; font-size: 16px; }
     a { color: #7be0ad; }
-    input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #1f2c52; background:#0e162d; color:#e9eef9; }
+    input[type="text"], input[type="number"] { width: 90%; padding: 10px; border-radius: 8px; border: 1px solid #1f2c52; background:#0e162d; color:#e9eef9; }
   </style>
 </head>
 <body>
-  <h1>Poll Admin</h1>
-  <div class="card">
-    <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-      <label style="color:#9aa6c2; font-weight:600;">API Key</label>
-      <input id="api-key" type="text" value="${keyParam}" placeholder="X-API-Key" />
-      <button class="btn" id="load-btn">Load polls</button>
-    </div>
-    <div class="status" id="status">Enter your API key and load polls.</div>
-    <div style="display:grid; gap:8px; margin-bottom:12px;">
-      <input id="poll-id" type="text" placeholder="Poll ID (leave blank to create new)" />
-      <input id="poll-question" type="text" placeholder="Question" />
-      <input id="poll-duration" type="number" min="1" value="30" placeholder="durationSeconds (default 30)" />
-      <textarea id="poll-options" rows="4" placeholder="One option per line (format: name|url optional)" style="resize:vertical; padding:10px; border-radius:8px; border:1px solid #1f2c52; background:#0e162d; color:#e9eef9;"></textarea>
+  <h1>Question Admin</h1>
+	  <div class="card">
+	    <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+	      <label style="color:#9aa6c2; font-weight:600;">API Key</label>
+	      <input id="api-key" type="text" value="${keyParam}" placeholder="X-API-Key" />
+	      <button class="btn" id="load-btn">Load polls</button>
+	    </div>
+	    <table id="poll-table">
+	      <thead>
+        <tr><th>Question Text</th><th>Votes</th><th>Closes</th><th>Actions</th></tr>
+	      </thead>
+	      <tbody id="poll-rows">
+	        <tr><td colspan="4">No data</td></tr>
+	      </tbody>
+	    </table>
+	    <div style="display:flex; justify-content:flex-end; margin:12px 0;">
+      <button class="btn" id="new-btn">New Question</button>
+	    </div>
+	    <div class="status" id="status">Enter your API key and load polls.</div>
+      <br />
+	    <div style="display:grid; gap:8px; margin-bottom:12px; display:none; border:1px solid #1f2c52; padding:10px; border-radius:10px;" id="form-area">
+	      <label style="color:#9aa6c2; font-weight:600;">Question ID (leave blank to create new)</label>
+	      <input id="poll-id" type="text" />
+	      <label style="color:#9aa6c2; font-weight:600;">Question Text</label>
+	      <input id="poll-question" type="text" />
+	      <label style="color:#9aa6c2; font-weight:600;">durationSeconds (default 30)</label>
+	      <input id="poll-duration" type="number" min="1" value="30" />
+	      <label style="color:#9aa6c2; font-weight:600;">Options (one per line, format: name|url optional)</label>
+	      <textarea id="poll-options" rows="4" style="resize:vertical; padding:10px; border-radius:8px; border:1px solid #1f2c52; background:#0e162d; color:#e9eef9;"></textarea>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn" id="new-btn">New Poll</button>
-        <button class="btn" id="save-btn">Save Poll</button>
+        <button class="btn" id="save-btn">Save Question</button>
       </div>
-    </div>
-    <table id="poll-table">
-      <thead>
-        <tr><th>Question</th><th>Votes</th><th>Closes</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="poll-rows">
-        <tr><td colspan="4">No data</td></tr>
-      </tbody>
-    </table>
-  </div>
+	    </div>
+	  </div>
 
   <script>
     (() => {
@@ -1024,12 +1102,14 @@ function renderAdminPollSpa(url) {
         duration: document.getElementById('poll-duration'),
         options: document.getElementById('poll-options'),
         save: document.getElementById('save-btn'),
-        fresh: document.getElementById('new-btn')
+        fresh: document.getElementById('new-btn'),
+        formArea: document.getElementById('form-area')
       };
 
       function setStatus(msg, error=false) {
         els.status.textContent = msg;
-        els.status.style.color = error ? '#ff8c7b' : '#9aa6c2';
+        els.status.style.color = error ? '#ff8c7b' : '#ffffff';
+        els.status.style.fontSize = '16px';
       }
 
       function parseOptions() {
@@ -1048,6 +1128,7 @@ function renderAdminPollSpa(url) {
         els.question.value = poll.question || '';
         els.duration.value = poll.durationSeconds || 30;
         els.options.value = (poll.options || []).map(opt => opt.url ? (opt.name + '|' + opt.url) : opt.name).join('\\n');
+        els.formArea.style.display = 'grid';
       }
 
       async function copyToClipboard(text) {
@@ -1107,6 +1188,7 @@ function renderAdminPollSpa(url) {
         els.question.value = '';
         els.duration.value = 30;
         els.options.value = '';
+        els.formArea.style.display = 'grid';
       }
 
       function renderRows(polls, apiKey) {
@@ -1119,13 +1201,14 @@ function renderAdminPollSpa(url) {
           const appUrl = '/poll/app?id=' + encodeURIComponent(p.id);
           return [
             '<tr>',
-            '<td><div style="font-weight:700;">', p.question || 'Untitled', '</div><div class="pill">', p.id, '</div></td>',
+            '<td><div style="font-weight:700;">', p.question || 'Untitled question', '</div><div class="pill">', p.id, '</div></td>',
             '<td>', total, '</td>',
             '<td>', p.close || 'n/a', '</td>',
             '<td>',
               '<a class="pill" href="', appUrl, '" target="_blank">Open</a> ',
               '<button class="btn" data-action="edit" data-id="', p.id, '">Edit</button>',
-              '<button class="btn" data-action="reset" data-id="', p.id, '">Reset</button>',
+              '<button class="btn" data-action="copy" data-id="', p.id, '">Copy User Link</button>',
+              '<button class="btn" data-action="reset" data-id="', p.id, '">Make Live</button>',
               '<button class="btn-danger" data-action="delete" data-id="', p.id, '">Delete</button>',
             '</td>',
             '</tr>'
@@ -1142,26 +1225,50 @@ function renderAdminPollSpa(url) {
                 if (poll) fillForm(poll);
                 setStatus('Loaded poll into form.');
                 return;
+              } else if (action === 'copy') {
+                const poll = polls.find(p => p.id === pollId);
+                if (poll) {
+                  const share = '❓ ' + (poll.question || 'Poll') + '\\n' + location.origin + '/poll/app?id=' + pollId;
+                  const ok = await copyToClipboard(share);
+                  setStatus(ok ? 'User link copied.' : 'Copy failed.', !ok);
+                }
+                return;
               } else if (action === 'reset') {
-                await fetch('/poll/reset', {
+                const res = await fetch('/poll/reset', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
                   body: JSON.stringify({ pollId })
                 });
-                const poll = polls.find(p => p.id === pollId);
-                if (poll) {
-                  const share = '❓ ' + (poll.question || 'Poll') + '\\n' + window.location.origin + '/poll/app?id=' + pollId;
+                const updated = await res.json();
+                if (res.ok) {
+                  const idx = polls.findIndex(p => p.id === pollId);
+                  if (idx >= 0) {
+                    polls[idx] = {
+                      ...polls[idx],
+                      ...updated,
+                      totalVotes: (updated.options || []).reduce((s, o) => s + (o.votes || 0), 0)
+                    };
+                  }
+                  renderRows(polls, apiKey);
+                  const share = '❓ ' + (updated.question || 'Poll') + '\\n' + location.origin + '/poll/app?id=' + pollId;
                   await copyToClipboard(share);
-                  setStatus('Reset and copied link to clipboard.');
+                  setStatus('Question is live: ends in ' + (updated.durationSeconds || 30) + 's. Answers reset. Link copied.');
+                } else {
+                  setStatus(updated.error || 'Reset failed', true);
                 }
-              } else if (action === 'delete') {
+                return;
+                } else if (action === 'delete') {
+                if (!confirm('Delete this poll?')) {
+                  return;
+                }
                 await fetch('/poll/admin/delete', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
                   body: JSON.stringify({ pollId })
                 });
+                await loadPolls();
+                return;
               }
-              await loadPolls();
             } catch (err) {
               setStatus(err.message, true);
             }
@@ -1192,7 +1299,10 @@ function renderAdminPollSpa(url) {
       els.load.addEventListener('click', loadPolls);
       els.key.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadPolls(); });
       els.save.addEventListener('click', savePoll);
-      els.fresh.addEventListener('click', clearForm);
+      els.fresh.addEventListener('click', () => {
+        clearForm();
+        setStatus('Creating new poll.');
+      });
 
       if (els.key.value) loadPolls();
     })();

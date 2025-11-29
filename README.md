@@ -124,6 +124,24 @@ Response:
 - `/poll/reset` resets an existing poll (auth required): sets `open` to now, `close` to now + `durationSeconds`, zeroes all votes, and clears voter markers so users can vote again. Body: `{ "pollId": "<id>" }`
 - `/poll/admin` (auth required) returns all polls with totals; `/poll/admin/delete` deletes a poll; `/poll/admin/spa` serves an admin UI (pass API key via `key` query or header)
 
+## Poll user experience
+- Cloudflare Workers returns two SPAs:
+  1) User SPA: `/poll/app?id=<poll-id>` where a user can load a specific question, vote while it’s live (before `close`), and see results.
+  2) Admin SPA: `/poll/admin/spa?key=<api-key>` where an admin can view all questions (with a full-access key) or edit a specific question (with a scoped key).
+- User SPA behavior:
+  - Countdown runs until `close` (or `durationSeconds` fallback); drum roll, then reveal.
+  - One vote per client fingerprint; selected option shows “You selected this option.”
+  - Reveal: winner highlighted (ties broken by lowest option id), confetti once, results locked; vote button hides during drum roll and after results.
+
+## Poll admin experience
+- URL: `/poll/admin/spa?key=<api-key>` (API key required).
+- Table shows questions with totals and closes; actions per row:
+  - `Edit`: load into the form below (form is hidden until “New Question” or edit).
+  - `Copy User Link`: copies a shareable link with the question text and SPA URL.
+  - `Make Live`: zeroes votes, restarts timer to durationSeconds, and copies the user link; status shows when it ends.
+  - `Delete`: asks for confirmation, then removes the question.
+- Form: create/update question (ID, text, durationSeconds, options). Click “New Question” to reveal it.
+
 ## Examples 
 
 ### Fractal Generation

@@ -2,7 +2,7 @@ require('dotenv').config({ path: process.env.DOTENV_CONFIG_PATH });
 
 const crypto = require('crypto');
 
-async function generateApiKey(expiry = '2025-12-31') {
+async function generateApiKey(expiry = '2025-12-31', resource = '') {
     const MASTER_KEY = process.env.MASTER_KEY;
     if (!MASTER_KEY) {
         console.error('MASTER_KEY environment variable is not set');
@@ -11,15 +11,18 @@ async function generateApiKey(expiry = '2025-12-31') {
 
     console.log('Generating key with:');
     console.log('- Environment:', process.env.NODE_ENV || 'development');
-    console.log('- MASTER_KEY:', MASTER_KEY);
+    console.log('- MASTER_KEY set:', !!MASTER_KEY);
     console.log('- Expiry:', expiry);
+    if (resource) console.log('- Resource:', resource);
 
     // Use current timestamp instead of random bytes
     const timestamp = Date.now().toString(16); // Convert to hex
     const prefix = 'stucal';
     
     // Create the key content
-    const keyContent = `${prefix}_${timestamp}_${expiry}`;
+    const keyContent = resource
+        ? `${prefix}_${timestamp}_${expiry}_${resource}`
+        : `${prefix}_${timestamp}_${expiry}`;
     
     // Generate signature using Web Crypto API
     const encoder = new TextEncoder();
@@ -53,7 +56,8 @@ async function generateApiKey(expiry = '2025-12-31') {
 // If running directly (not imported)
 if (require.main === module) {
     const expiry = process.argv[2] || '2025-12-31';
-    generateApiKey(expiry).then(key => {
+    const resource = process.argv[3] || '';
+    generateApiKey(expiry, resource).then(key => {
         console.log('\nGenerated API Key:', key);
     }).catch(error => {
         console.error('Error generating key:', error);

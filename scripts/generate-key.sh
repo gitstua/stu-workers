@@ -32,8 +32,26 @@ if [ -z "$expiry" ]; then
     expiry=$default_expiry
 fi
 
+read -p "Enter a poll ID to scope this key (optional): " resource
+if [ -n "$resource" ]; then
+    echo "Scoping key to resource: $resource"
+fi
+
 echo "Generating key..."
 
 # Run the Node.js script with the expiry date
 DOTENV_CONFIG_PATH=".env" \
-node -r dotenv/config scripts/generate-api-key.js "$expiry" 
+key=$(node -r dotenv/config scripts/generate-api-key.js "$expiry" "$resource")
+
+echo ""
+echo "Generated key: $key"
+if [ -n "$resource" ]; then
+  echo "Scoped to questionId: $resource"
+  echo "Use header: X-API-Key: $key"
+  echo "Question SPA:   https://stu-workers.stuey.workers.dev/poll/app?id=$resource"
+  echo "Admin SPA:  https://stu-workers.stuey.workers.dev/poll/admin/spa?key=$key"
+else
+  echo "Unscoped key (all questions):"
+  echo "Use header: X-API-Key: $key"
+  echo "Admin SPA:  https://stu-workers.stuey.workers.dev/poll/admin/spa?key=$key"
+fi
