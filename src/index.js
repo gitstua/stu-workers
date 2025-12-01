@@ -1219,7 +1219,7 @@ function renderAdminPollSpa(url) {
             '<td>', total, '</td>',
             '<td>', formatClose(p.close), '</td>',
             '<td>',
-              '<a class="pill" href="', appUrl, '" target="_blank">Open</a> ',
+              '<a class="pill" href="', appUrl, '" target="_blank">Preview</a> ',
               '<button class="btn" data-action="edit" data-id="', p.id, '">Edit</button>',
               '<button class="btn" data-action="copy" data-id="', p.id, '">Copy User Link</button>',
               '<button class="btn" data-action="reset" data-id="', p.id, '">Make Live</button>',
