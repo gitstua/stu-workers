@@ -705,21 +705,22 @@ function renderPollSpa(url) {
     .meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
     .pill { padding: 8px 12px; border-radius: 999px; background: var(--pill); border: 1px solid var(--border); color: var(--muted); font-size: 13px; }
     .pill strong { color: var(--text); }
-    .options { display: grid; gap: 10px; margin: 12px 0 4px; }
+    .options { display: grid; gap: 8px; margin: 12px 0 4px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
     .option {
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
+      border-radius: 10px;
+      padding: 8px;
       background: #0f1731;
       display: grid;
-      grid-template-columns: auto 1fr auto;
-      gap: 12px;
+      gap: 6px;
       align-items: center;
+      min-height: auto;
     }
     .option.disabled { opacity: 0.6; }
     .option.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(123,224,173,0.3); }
-    .option .meta { display: grid; gap: 4px; }
-    .option .name { font-weight: 700; font-size: 16px; }
+    .option .meta { display: grid; gap: 6px; }
+    .option .actions { display: flex; justify-content: center; }
+    .option button { width: 100%; padding: 10px 12px; }
     .votes { color: var(--muted); font-size: 13px; }
     .bar { width: 100%; height: 8px; border-radius: 999px; background: #121c3c; overflow: hidden; }
     .bar span { display: block; height: 100%; background: linear-gradient(120deg, var(--accent), var(--accent-2)); }
@@ -743,9 +744,6 @@ function renderPollSpa(url) {
       </div>
       <div id="status" class="status"></div>
       <div id="options" class="options"></div>
-      <div class="actions">
-        <button id="vote-btn">Submit vote</button>
-      </div>
     </div>
   </div>
 
@@ -765,7 +763,6 @@ function renderPollSpa(url) {
       };
 
       const els = {
-        voteBtn: document.getElementById('vote-btn'),
         options: document.getElementById('options'),
         status: document.getElementById('status'),
         countdown: document.getElementById('countdown-pill'),
@@ -840,7 +837,8 @@ function renderPollSpa(url) {
         els.total.textContent = 'Total votes: ' + total;
 
         const opts = viewOptions();
-        els.options.innerHTML = opts.map((opt, idx) => {
+        const displayOpts = state.phase === 'reveal' ? opts.slice(0, 3) : opts;
+        els.options.innerHTML = displayOpts.map((opt, idx) => {
           const isWinner = state.phase === 'reveal' && idx === 0;
           const isChosen = state.phase !== 'reveal' && state.votedOption === idx;
           const pct = total > 0 ? Math.round(((opt.votes || 0) / total) * 100) : 0;
@@ -857,22 +855,27 @@ function renderPollSpa(url) {
             if (state.votedOption !== null && state.votedOption !== idx) optionClass += 'disabled ';
             if (isChosen) optionClass += 'selected';
           }
+          const buttonLabel = state.phase === 'reveal' && isWinner ? '🏆🎉 ' + opt.name : opt.name;
           return [
-            '<label class="option ', optionClass, '">',
-              '<input type="radio" name="option" value="', idx, '" ', state.selected === idx ? 'checked' : '', ' ', disabled, ' style="margin-right:10px;">',
+            '<div class="option ', optionClass, '">',
               '<div class="meta">',
-                '<div class="name">', (isWinner ? '<strong>🏆🎉 Winner:</strong> ' : ''), opt.name, '</div>',
                 '<div class="bar"><span style="width:', showNumbers ? pct : 0, '%;"></span></div>',
                 '<div class="votes">', votesLabel, '</div>',
               '</div>',
+              '<div class="actions">',
+                '<button class="btn" data-idx="', idx, '" ', disabled, '>', state.phase === 'reveal' ? buttonLabel : buttonLabel, '</button>',
+              '</div>',
               orderBadge,
-            '</label>'
+            '</div>'
           ].join('');
         }).join('');
 
-        els.options.querySelectorAll('input[name="option"]').forEach(input => {
-          input.addEventListener('change', () => {
-            state.selected = Number(input.value);
+        els.options.querySelectorAll('button[data-idx]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const idx = Number(btn.getAttribute('data-idx'));
+            if (state.phase !== 'countdown') return;
+            state.selected = idx;
+            await submitVote();
           });
         });
 
@@ -985,16 +988,6 @@ function renderPollSpa(url) {
         }
         renderPoll();
       }
-
-      els.voteBtn.addEventListener('click', submitVote);
-      const updateVoteBtnVisibility = () => {
-        els.voteBtn.style.display = (state.phase === 'drumroll' || state.phase === 'reveal') ? 'none' : 'inline-block';
-      };
-      const _renderPollOrig = renderPoll;
-      renderPoll = function() {
-        _renderPollOrig();
-        updateVoteBtnVisibility();
-      };
 
       function triggerConfetti() {
         const container = document.querySelector('.shell');
