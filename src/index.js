@@ -1045,6 +1045,7 @@ function renderAdminPollSpa(url) {
     .status { margin: 8px 0 12px; color: #ffffff; font-size: 16px; }
     a { color: #7be0ad; }
     input[type="text"], input[type="number"] { width: 90%; padding: 10px; border-radius: 8px; border: 1px solid #1f2c52; background:#0e162d; color:#e9eef9; }
+    input#api-key { width: 200px; max-width: 220px; }
   </style>
 </head>
 <body>
